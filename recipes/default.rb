@@ -7,16 +7,21 @@
 # All rights reserved - Do Not Redistribute
 #
 
-# install required packages
-install_packages = %w{
-  make
-  curl
-  libsqlite3-dev
-  libbz2-dev
-  git
-}
+location = node[:anyenv][:location]
 
-install_packages.each do |p|
+user = node[:anyenv][location][:user]
+prefix = node[:anyenv][location][:prefix]
+dir = node[:anyenv][location][:dir]
+profile = node[:anyenv][location][:profile]
+anyenv_root="#{prefix}/#{dir}"
+
+
+# install required packages
+include_recipe "build-essential"
+include_recipe "git"
+include_recipe "yum-epel" if node[:platform_family] == 'rhel'
+
+node[:anyenv][:requires].each do |p|
   package p do
     action :install
   end
@@ -24,32 +29,29 @@ end
 
 # install anyenv
 bash "anyenv" do
-  user node[:user][:name]
-  cwd  node[:user][:home]
-  environment "HOME" => node[:user][:home]
-
+  user user
+  environment "ANYENV_ROOT" => "#{anyenv_root}"
   code <<-EOC
-    git clone https://github.com/riywo/anyenv $HOME/.anyenv
-    echo 'export PATH="$HOME/.anyenv/bin:$PATH"' >> $HOME/.bashrc
-    echo 'eval "$(anyenv init -)"' >> $HOME/.bashrc
+    git clone https://github.com/riywo/anyenv #{anyenv_root}
+    echo 'export ANYENV_ROOT=#{anyenv_root}' >> #{profile}
+    echo 'export PATH="#{anyenv_root}/bin:$PATH"' >> #{profile}
+    echo 'eval "$(anyenv init -)"' >> #{profile}
   EOC
-  not_if { File.exist?("#{node[:user][:home]}/.anyenv") }
+  not_if { File.exist?("#{anyenv_root}") }
 end
 
 # install *env
 anyenvs = %w{plenv ndenv rbenv pyenv phpenv}
 anyenvs.each do |install_env|
   bash install_env do
-    user node[:user][:name]
-    cwd node[:user][:home]
-    environment "HOME" => node[:user][:home]
-
+    user user
+    environment "ANYENV_ROOT" => "#{anyenv_root}"
     code <<-EOC
-      export PATH="$HOME/.anyenv/bin:$PATH"
+      export PATH="#{anyenv_root}/bin:$PATH"
       eval "$(anyenv init -)"
       anyenv install #{install_env}
     EOC
-    not_if { File.exist?("#{node[:user][:home]}/.anyenv/envs/#{install_env}") }
+    not_if { File.exist?("#{anyenv_root}/envs/#{install_env}") }
   end
 end
 
@@ -62,11 +64,11 @@ anyenv_map = {
   "php" =>    "phpenv",
 }
 anyenv_map.keys.each do |program|
-  anyenv = node[:anyenv]
+  anyenv = node[:anyenv][:envs]
   next unless anyenv.key?(program)
   anyenv[program][:versions].each do |version|
     install_script = <<-EOC
-      export PATH="$HOME/.anyenv/bin:$PATH"
+      export PATH="#{anyenv_root}/bin:$PATH"
       eval "$(anyenv init -)"
       #{anyenv_map[program]} install #{version};
     EOC
@@ -75,11 +77,10 @@ anyenv_map.keys.each do |program|
     install_script << "#{anyenv_map[program]} global #{version};" if version == anyenv[program][:global]
 
     bash "#{program} - #{version}" do
-      user node[:user][:name]
-      cwd node[:user][:home]
-      environment "HOME" => node[:user][:home]
+      user user
+      environment "ANYENV_ROOT" => "#{anyenv_root}"
       code install_script
-      not_if { File.exist?("#{node[:user][:home]}/.anyenv/envs/#{anyenv_map[program]}/versions/#{version}") }
+      not_if { File.exist?("#{anyenv_root}/envs/#{anyenv_map[program]}/versions/#{version}") }
     end
   end
 end
